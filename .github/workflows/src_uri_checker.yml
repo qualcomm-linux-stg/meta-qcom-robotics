@@ -1,0 +1,68 @@
+name: Check SRC_URI Patterns
+
+on:
+  pull_request:
+    paths:
+      - '**/*.bb'
+      - '**/*.bbappend'
+
+jobs:
+  check-src-uri:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Debug runner
+        run: |
+          echo "Runner is alive"
+          uname -a
+          whoami
+
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # Ensures full history for git diff
+      
+      - name: Checkout repository containing src_uri_checker.py
+        uses: actions/checkout@v3
+        with:
+          repository: 'qualcomm-linux/QLinuxPRSecurity'
+          path: 'scripts/src_uri_checker.py'
+          fetch-depth: 0
+          token: ${{ secrets.PAT }}
+      
+      - name: Run SRC_URI check on changed files
+        id: run-check
+        continue-on-error: true
+        run: |
+          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -E '\.bb$|\.bbappend$' || true)
+          if [ -z "$CHANGED_FILES" ]; then
+            echo "No .bb or .bbappend files changed."
+            echo "comment=No .bb or .bbappend files changed in this PR." >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          OUTPUT=""
+          for file in $CHANGED_FILES; do
+            echo "Checking $file"
+            RESULT=$(python3 QLinuxPRSecurity/scripts/src_uri_checker.py "$file" || true)
+            echo "$RESULT"
+            OUTPUT="${OUTPUT}\n\n### File: $file\n\`\`\`\n$RESULT\n\`\`\`"
+          done
+
+          {
+            echo "comment<<EOF"
+            echo -e "$OUTPUT"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+
+      - name: Comment on PR
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.PAT }}
+          script: |
+            github.issues.createComment({
+              issue_number: github.context.pullRequest.number,
+              owner: github.context.repo.owner,
+              repo: github.context.repo.repo,
+              body: 'Hello World!'
+            })
